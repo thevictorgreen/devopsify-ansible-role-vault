@@ -1,6 +1,231 @@
 ---
-# tasks file for Vault
+# tasks file for roles/vaultserver
 - name: Update Repositories
   become: yes
   apt:
     update_cache: yes
+
+- name: Install Prerequisites
+  become: yes
+  apt:
+    name: "{{ packages }}"
+  vars:
+    packages:
+      - unzip
+      - nginx
+
+- name: Upload Hashicorp Consul 1.6.1 binary
+  become: yes
+  copy:
+    src: consul_1.6.1_linux_amd64.zip
+    dest: /tmp/consul_1.6.1_linux_amd64.zip
+    force: no
+
+- name: Unarchive Hashicorp Consul 1.6.1 binary
+  become: yes
+  unarchive:
+    src: /tmp/consul_1.6.1_linux_amd64.zip
+    dest: /usr/local/bin
+    remote_src: yes
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Create Hashicorp Consul related directories
+  become: yes
+  file:
+    path: "{{ item }}"
+    state: directory
+  with_items:
+    - '/var/consul'
+    - '/var/consul/data'
+    - '/etc/consul.d'
+    - '/etc/consul.d/tls'
+    - '/etc/consul.d/tls/ca'
+    - '/etc/consul.d/tls/client'
+
+- name: Upload Hashicorp Consul client.json file
+  become: yes
+  copy:
+    src: client.json
+    dest: /etc/consul.d/client.json
+    force: no
+
+- name: Upload Hashicorp Consul service definition file
+  become: yes
+  copy:
+    src: consul.service
+    dest: /etc/systemd/system/consul.service
+    force: no
+
+- name: Create consul group
+  become: yes
+  group:
+    name: consul
+    state: present
+
+- name: Create consul user
+  become: yes
+  user:
+    name: consul
+    shell: /sbin/nologin
+    groups: consul
+
+- name: Upload environment file to /etc/environment
+  become: yes
+  copy:
+    src: environment
+    dest: /etc/environment
+    force: no
+
+- name: Set ip address in client.json file
+  become: yes
+  shell: sed -i s/YYYYY/$(hostname -i | cut -d' ' -f1)/g /etc/consul.d/client.json
+
+- name: Set hostname in environment file
+  become: yes
+  shell: sed -i s/XXXXX/$(hostname)/g /etc/environment
+
+- name: Set node name and node number in client.json
+  become: yes
+  shell:
+    cmd: |
+      if [ $( hostname | grep '000' ) ]
+      then
+           sed -i 's/XXXXX/consul-03/g' /etc/consul.d/client.json
+           sed -i 's/prod-client-cyan.corp.deloittefusion.net-X.pem/prod-client-cyan.corp.deloittefusion.net-0.pem/g' /etc/consul.d/client.json
+           sed -i 's/prod-client-cyan.corp.deloittefusion.net-X-key.pem/prod-client-cyan.corp.deloittefusion.net-0-key.pem/g' /etc/consul.d/client.json
+      elif [ $( hostname | grep '001' ) ]
+      then
+           sed -i 's/XXXXX/consul-04/g' /etc/consul.d/client.json
+           sed -i 's/prod-client-cyan.corp.deloittefusion.net-X.pem/prod-client-cyan.corp.deloittefusion.net-1.pem/g' /etc/consul.d/client.json
+           sed -i 's/prod-client-cyan.corp.deloittefusion.net-X-key.pem/prod-client-cyan.corp.deloittefusion.net-1-key.pem/g' /etc/consul.d/client.json
+      elif [ $( hostname | grep '002' ) ]
+      then
+           sed -i 's/XXXXX/consul-05/g' /etc/consul.d/client.json
+           sed -i 's/prod-client-cyan.corp.deloittefusion.net-X.pem/prod-client-cyan.corp.deloittefusion.net-2.pem/g' /etc/consul.d/client.json
+           sed -i 's/prod-client-cyan.corp.deloittefusion.net-X-key.pem/prod-client-cyan.corp.deloittefusion.net-2-key.pem/g' /etc/consul.d/client.json
+      fi
+
+- name: Sourcing new environment file
+  become: yes
+  shell: source /etc/environment
+  register: new_source
+  failed_when: new_source.changed != true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Upload Hashicorp Vault 1.2.3 binary
+  become: yes
+  copy:
+    src: vault_1.2.3_linux_amd64.zip
+    dest: /tmp/vault_1.2.3_linux_amd64.zip
+
+- name: Unarchive Hashicorp Vault 1.2.3 binary
+  become: yes
+  unarchive:
+    src: /tmp/vault_1.2.3_linux_amd64.zip
+    dest: /usr/local/bin
+    remote_src: yes
+  ignore_errors: "{{ ansible_check_mode }}"
+
+
+- name: Create Hashicorp Vault related directories
+  become: yes
+  file:
+    path: "{{ item }}"
+    state: directory
+  with_items:
+    - '/etc/vault'
+    - '/etc/vault/policies'
+    - '/etc/vault/users'
+    - '/etc/vault/tls'
+    - '/opt/vault-data'
+    - '/var/log/vault'
+
+- name: Upload Hashicorp Vault config.json file
+  become: yes
+  copy:
+    src: config.json
+    dest: /etc/vault/config.json
+    force: no
+
+- name: Upload Hashicorp Vault service definition file
+  become: yes
+  copy:
+    src: vault.service
+    dest: /etc/systemd/system/vault.service
+    force: no
+
+- name: Start The Hashicorp Vault Service
+  become: yes
+  systemd:
+    state: started
+    name: vault.service
+
+- name: Create Openssl req.conf File
+  become: yes
+  copy:
+    src: req.conf
+    dest: /etc/nginx/req.conf
+
+- name: Set hostname in req.conf config file
+  become: yes
+  shell: sed -i s/XXXXX/$(hostname)/g /etc/nginx/req.conf
+
+- name: Set ip address in req.conf config file
+  become: yes
+  shell: sed -i s/YYYYY/$(hostname -i | cut -d' ' -f1)/g /etc/nginx/req.conf
+
+- name: Create nginx default config file
+  become: yes
+  copy:
+    src: default.nginx
+    dest: /etc/nginx/sites-available/default
+
+- name: Set hostname in nginx default config file
+  become: yes
+  shell: sed -i s/XXXXX/$(hostname)/g /etc/nginx/sites-available/default
+
+- name: Create Hashicorp Vault automation directory
+  become: yes
+  file:
+    path: "{{ item }}"
+    state: directory
+  with_items:
+    - '/root/.vault_automate'
+
+- name: Upload Hashicorp Vault Nginx proxy initialization script
+  become: yes
+  copy:
+    src: vault_init.sh
+    dest: /root/.vault_automate/vault_init.sh
+    force: no
+
+- name: Change permissions on vault_init.sh
+  become: yes
+  file:
+    path: /root/.vault_automate/vault_init.sh
+    mode: "u+rwx"
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Run Hashicorp Vault Initialization script
+  become: yes
+  command: /root/.vault_automate/vault_init.sh
+  args:
+    executable: /bin/bash
+
+- name: TODO Items
+  debug:
+    msg:
+      - "Put All Nodes in /etc/hosts eg: 10.224.0.117 pucyan0acon000.cyan.corp.deloittefusion.net pucyan0acon000 consul-00"
+      - "Upload consul client TLS certs into appropriate directories"
+      - "systemctl daemon-reload"
+      - "systemctl enable consul"
+      - "systemctl status -l consul"
+      - "systemctl start consul"
+      - "systemctl status -l consul"
+      - "consul members list"
+      - "Generate and Upload vault cluster TLS certs to appropriate directories"
+      - "systemctl daemon-reload"
+      - "systemctl enable vault"
+      - "systemctl start vault"
+      - "systemctl status -l vault"
+      - "vault status"
